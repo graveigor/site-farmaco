@@ -1,0 +1,785 @@
+// Schema do Sistema de Gestao - Distribuidora Farmaceutica
+//
+// PORTABILIDADE: o provider abaixo esta em "sqlite" para permitir rodar o
+// projeto localmente sem servidor de banco. Para migrar para PostgreSQL basta
+// trocar o provider para "postgresql" e ajustar DATABASE_URL no .env.
+// Por esse motivo o schema evita recursos nao suportados pelo SQLite
+// (enums e arrays). Os campos de status usam String e sao validados na
+// aplicacao atraves das constantes em src/lib/constants.ts.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// USUARIOS, AREAS E PERMISSOES
+// ---------------------------------------------------------------------------
+
+model Usuario {
+  id        String   @id @default(cuid())
+  nome      String
+  email     String   @unique
+  senhaHash String
+  cargo     String?
+  area      String // ver AREAS em src/lib/constants.ts
+  perfil    String // ver PERFIS em src/lib/constants.ts
+  ativo     Boolean  @default(true)
+  ultimoLogin DateTime?
+  // Quando o usuario concluiu (ou dispensou) o tour de boas-vindas. Nulo = ainda
+  // nao viu, entao o tour abre sozinho no proximo acesso.
+  tourVistoEm DateTime?
+  criadoEm  DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  colaborador       Colaborador?
+  logs              LogAcao[]
+  pedidosVenda      PedidoVenda[]      @relation("VendedorPedido")
+  pedidosCompra     PedidoCompra[]     @relation("CompradorPedido")
+  aprovacoesCompra  PedidoCompra[]     @relation("AprovadorCompra")
+  metas             MetaComercial[]
+  comissoes         Comissao[]
+  oportunidades     Oportunidade[]
+
+  @@index([area])
+  @@index([perfil])
+}
+
+model LogAcao {
+  id        String   @id @default(cuid())
+  usuarioId String?
+  usuario   Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  acao      String // CRIAR, EDITAR, EXCLUIR, APROVAR, EXPORTAR, LOGIN, LOGOUT
+  entidade  String // nome do modelo afetado
+  entidadeId String?
+  detalhes  String?
+  ip        String?
+  criadoEm  DateTime @default(now())
+
+  @@index([usuarioId])
+  @@index([entidade, entidadeId])
+  @@index([criadoEm])
+}
+
+// ---------------------------------------------------------------------------
+// SUPRIMENTOS: FORNECEDORES, PRODUTOS, COMPRAS
+// ---------------------------------------------------------------------------
+
+model Fornecedor {
+  id            String  @id @default(cuid())
+  razaoSocial   String
+  nomeFantasia  String?
+  cnpj          String  @unique
+  inscricaoEstadual String?
+  email         String?
+  telefone      String?
+  contatoNome   String?
+  cep           String?
+  logradouro    String?
+  numero        String?
+  bairro        String?
+  cidade        String?
+  uf            String?
+  prazoEntregaDias Int   @default(7)
+  condicaoPagamento String?
+  observacoes   String?
+  ativo         Boolean @default(true)
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+
+  produtos      Produto[]
+  cotacoes      Cotacao[]
+  pedidosCompra PedidoCompra[]
+  contasPagar   ContaPagar[]
+
+  @@index([razaoSocial])
+}
+
+model Produto {
+  id             String  @id @default(cuid())
+  sku            String  @unique
+  nomeComercial  String
+  principioAtivo String?
+  fabricante     String?
+  categoria      String?
+  codigoBarras   String?
+  ncm            String?
+  cest           String?
+  unidadeMedida  String  @default("CX")
+  registroAnvisa String?
+  exigeReceita   Boolean @default(false)
+  controlado     Boolean @default(false)
+
+  estoqueMinimo  Int     @default(0)
+  estoqueMaximo  Int     @default(0)
+  custoMedio     Float   @default(0)
+  precoVenda     Float   @default(0)
+
+  status         String  @default("ATIVO") // ATIVO, INATIVO, DESCONTINUADO
+
+  fornecedorId   String?
+  fornecedor     Fornecedor? @relation(fields: [fornecedorId], references: [id], onDelete: SetNull)
+
+  criadoEm       DateTime @default(now())
+  atualizadoEm   DateTime @updatedAt
+
+  lotes             Lote[]
+  itensPedidoVenda  ItemPedidoVenda[]
+  itensPedidoCompra ItemPedidoCompra[]
+  movimentos        MovimentoEstoque[]
+  historicoPrecos   HistoricoPreco[]
+  itensCotacao      ItemCotacao[]
+  itensDevolucao    ItemDevolucao[]
+  campanhas         CampanhaProduto[]
+
+  @@index([nomeComercial])
+  @@index([categoria])
+  @@index([status])
+}
+
+model Lote {
+  id             String   @id @default(cuid())
+  produtoId      String
+  produto        Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  codigo         String
+  dataFabricacao DateTime?
+  dataValidade   DateTime
+  quantidade     Int      @default(0)
+  quantidadeReservada Int @default(0)
+  custoUnitario  Float    @default(0)
+  localizacao    String? // ex: RUA-A / PRAT-03 / NIV-2
+  bloqueado      Boolean  @default(false)
+  criadoEm       DateTime @default(now())
+  atualizadoEm   DateTime @updatedAt
+
+  movimentos     MovimentoEstoque[]
+  itensSeparacao ItemSeparacao[]
+  itensDevolucao ItemDevolucao[]
+
+  @@unique([produtoId, codigo])
+  @@index([dataValidade])
+}
+
+model MovimentoEstoque {
+  id         String   @id @default(cuid())
+  produtoId  String
+  produto    Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  loteId     String?
+  lote       Lote?    @relation(fields: [loteId], references: [id], onDelete: SetNull)
+  tipo       String // ENTRADA, SAIDA, AJUSTE, DEVOLUCAO, PERDA, INVENTARIO
+  quantidade Int // positivo = entrada, negativo = saida
+  saldoApos  Int
+  origem     String? // ex: PEDIDO_COMPRA, PEDIDO_VENDA, INVENTARIO
+  origemId   String?
+  motivo     String?
+  usuarioId  String?
+  criadoEm   DateTime @default(now())
+
+  @@index([produtoId])
+  @@index([criadoEm])
+}
+
+model HistoricoPreco {
+  id         String   @id @default(cuid())
+  produtoId  String
+  produto    Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  tipo       String // CUSTO, VENDA
+  valorAnterior Float
+  valorNovo  Float
+  motivo     String?
+  usuarioId  String?
+  criadoEm   DateTime @default(now())
+
+  @@index([produtoId])
+}
+
+model SolicitacaoCompra {
+  id           String   @id @default(cuid())
+  numero       String   @unique
+  descricao    String
+  justificativa String?
+  status       String   @default("ABERTA") // ABERTA, EM_COTACAO, APROVADA, REJEITADA, CONVERTIDA
+  solicitanteId String?
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  cotacoes     Cotacao[]
+  pedidos      PedidoCompra[]
+}
+
+model Cotacao {
+  id            String   @id @default(cuid())
+  solicitacaoId String
+  solicitacao   SolicitacaoCompra @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+  fornecedorId  String
+  fornecedor    Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Cascade)
+  valorTotal    Float    @default(0)
+  prazoEntregaDias Int   @default(0)
+  condicaoPagamento String?
+  validadeProposta DateTime?
+  status        String   @default("RECEBIDA") // RECEBIDA, SELECIONADA, DESCARTADA
+  criadoEm      DateTime @default(now())
+
+  itens         ItemCotacao[]
+}
+
+model ItemCotacao {
+  id         String  @id @default(cuid())
+  cotacaoId  String
+  cotacao    Cotacao @relation(fields: [cotacaoId], references: [id], onDelete: Cascade)
+  produtoId  String
+  produto    Produto @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+  quantidade Int
+  precoUnitario Float
+}
+
+model PedidoCompra {
+  id            String   @id @default(cuid())
+  numero        String   @unique
+  fornecedorId  String
+  fornecedor    Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
+  solicitacaoId String?
+  solicitacao   SolicitacaoCompra? @relation(fields: [solicitacaoId], references: [id], onDelete: SetNull)
+
+  status        String   @default("RASCUNHO") // RASCUNHO, AGUARDANDO_APROVACAO, APROVADO, REJEITADO, RECEBIDO_PARCIAL, RECEBIDO, CANCELADO
+  valorTotal    Float    @default(0)
+  previsaoEntrega DateTime?
+  observacoes   String?
+
+  compradorId   String?
+  comprador     Usuario? @relation("CompradorPedido", fields: [compradorId], references: [id], onDelete: SetNull)
+  aprovadorId   String?
+  aprovador     Usuario? @relation("AprovadorCompra", fields: [aprovadorId], references: [id], onDelete: SetNull)
+  aprovadoEm    DateTime?
+
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+
+  itens         ItemPedidoCompra[]
+  contasPagar   ContaPagar[]
+
+  @@index([status])
+}
+
+model ItemPedidoCompra {
+  id             String  @id @default(cuid())
+  pedidoCompraId String
+  pedidoCompra   PedidoCompra @relation(fields: [pedidoCompraId], references: [id], onDelete: Cascade)
+  produtoId      String
+  produto        Produto @relation(fields: [produtoId], references: [id], onDelete: Restrict)
+  quantidade     Int
+  quantidadeRecebida Int @default(0)
+  precoUnitario  Float
+  loteCodigo     String?
+  dataValidade   DateTime?
+}
+
+// ---------------------------------------------------------------------------
+// COMERCIAL: CLIENTES, PIPELINE, PEDIDOS DE VENDA
+// ---------------------------------------------------------------------------
+
+model Cliente {
+  id            String  @id @default(cuid())
+  razaoSocial   String
+  nomeFantasia  String?
+  cnpj          String  @unique
+  inscricaoEstadual String?
+  email         String?
+  telefone      String?
+  contatoNome   String?
+  cep           String?
+  logradouro    String?
+  numero        String?
+  bairro        String?
+  cidade        String?
+  uf            String?
+  segmento      String? // FARMACIA, HOSPITAL, CLINICA, REDE, DISTRIBUIDOR
+  limiteCredito Float   @default(0)
+  condicaoPagamento String?
+  bloqueado     Boolean @default(false)
+  observacoes   String?
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+
+  pedidos       PedidoVenda[]
+  contasReceber ContaReceber[]
+  devolucoes    Devolucao[]
+  oportunidades Oportunidade[]
+  interacoes    Interacao[]
+
+  @@index([razaoSocial])
+}
+
+model Oportunidade {
+  id          String   @id @default(cuid())
+  titulo      String
+  clienteId   String?
+  cliente     Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  prospectNome String?
+  etapa       String   @default("PROSPECCAO") // PROSPECCAO, QUALIFICACAO, PROPOSTA, NEGOCIACAO, GANHA, PERDIDA
+  valorEstimado Float  @default(0)
+  probabilidade Int    @default(50)
+  responsavelId String?
+  responsavel Usuario? @relation(fields: [responsavelId], references: [id], onDelete: SetNull)
+  previsaoFechamento DateTime?
+  motivoPerda String?
+  criadoEm    DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  @@index([etapa])
+}
+
+model Interacao {
+  id        String   @id @default(cuid())
+  clienteId String
+  cliente   Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  tipo      String // LIGACAO, EMAIL, VISITA, REUNIAO, POS_VENDA
+  assunto   String
+  descricao String?
+  usuarioId String?
+  criadoEm  DateTime @default(now())
+
+  @@index([clienteId])
+}
+
+model PedidoVenda {
+  id          String   @id @default(cuid())
+  numero      String   @unique
+  clienteId   String
+  cliente     Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  vendedorId  String?
+  vendedor    Usuario? @relation("VendedorPedido", fields: [vendedorId], references: [id], onDelete: SetNull)
+
+  // Fluxo: RASCUNHO -> AGUARDANDO_APROVACAO -> APROVADO -> EM_SEPARACAO ->
+  // CONFERIDO -> FATURADO -> EXPEDIDO -> EM_TRANSPORTE -> ENTREGUE
+  status      String   @default("RASCUNHO")
+
+  subtotal    Float    @default(0)
+  desconto    Float    @default(0)
+  valorTotal  Float    @default(0)
+  condicaoPagamento String?
+  prazoDias   Int      @default(30)
+  observacoes String?
+  motivoBloqueio String?
+
+  aprovadoEm  DateTime?
+  faturadoEm  DateTime?
+  expedidoEm  DateTime?
+  entregueEm  DateTime?
+
+  criadoEm    DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  itens       ItemPedidoVenda[]
+  separacao   Separacao?
+  notaFiscal  NotaFiscal?
+  entrega     Entrega?
+  contasReceber ContaReceber[]
+  devolucoes  Devolucao[]
+  comissoes   Comissao[]
+
+  @@index([status])
+  @@index([clienteId])
+}
+
+model ItemPedidoVenda {
+  id            String  @id @default(cuid())
+  pedidoVendaId String
+  pedidoVenda   PedidoVenda @relation(fields: [pedidoVendaId], references: [id], onDelete: Cascade)
+  produtoId     String
+  produto       Produto @relation(fields: [produtoId], references: [id], onDelete: Restrict)
+  quantidade    Int
+  precoUnitario Float
+  desconto      Float   @default(0)
+  total         Float   @default(0)
+
+  itensSeparacao ItemSeparacao[]
+}
+
+model MetaComercial {
+  id         String  @id @default(cuid())
+  usuarioId  String
+  usuario    Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  ano        Int
+  mes        Int
+  valorMeta  Float
+  criadoEm   DateTime @default(now())
+
+  @@unique([usuarioId, ano, mes])
+}
+
+// ---------------------------------------------------------------------------
+// LOGISTICA: SEPARACAO, NOTA FISCAL, EXPEDICAO, ENTREGA, DEVOLUCAO
+// ---------------------------------------------------------------------------
+
+model Separacao {
+  id            String   @id @default(cuid())
+  pedidoVendaId String   @unique
+  pedidoVenda   PedidoVenda @relation(fields: [pedidoVendaId], references: [id], onDelete: Cascade)
+  status        String   @default("PENDENTE") // PENDENTE, EM_ANDAMENTO, SEPARADO, CONFERIDO, DIVERGENTE
+  separadorId   String?
+  conferenteId  String?
+  iniciadaEm    DateTime?
+  finalizadaEm  DateTime?
+  conferidaEm   DateTime?
+  observacoes   String?
+  criadoEm      DateTime @default(now())
+
+  itens         ItemSeparacao[]
+}
+
+model ItemSeparacao {
+  id                String  @id @default(cuid())
+  separacaoId       String
+  separacao         Separacao @relation(fields: [separacaoId], references: [id], onDelete: Cascade)
+  itemPedidoVendaId String
+  itemPedidoVenda   ItemPedidoVenda @relation(fields: [itemPedidoVendaId], references: [id], onDelete: Cascade)
+  loteId            String?
+  lote              Lote?   @relation(fields: [loteId], references: [id], onDelete: SetNull)
+  quantidadeSolicitada Int
+  quantidadeSeparada   Int  @default(0)
+  quantidadeConferida  Int  @default(0)
+  localizacao       String?
+}
+
+model NotaFiscal {
+  id            String   @id @default(cuid())
+  numero        String   @unique
+  serie         String   @default("1")
+  chaveAcesso   String?
+  pedidoVendaId String   @unique
+  pedidoVenda   PedidoVenda @relation(fields: [pedidoVendaId], references: [id], onDelete: Cascade)
+  valorTotal    Float
+  status        String   @default("EMITIDA") // EMITIDA, CANCELADA
+  emitidaEm     DateTime @default(now())
+}
+
+model Entrega {
+  id            String   @id @default(cuid())
+  pedidoVendaId String   @unique
+  pedidoVenda   PedidoVenda @relation(fields: [pedidoVendaId], references: [id], onDelete: Cascade)
+  transportadora String?
+  motorista     String?
+  placaVeiculo  String?
+  codigoRastreio String?
+  status        String   @default("AGUARDANDO") // AGUARDANDO, EM_ROTA, ENTREGUE, INSUCESSO
+  previsaoEntrega DateTime?
+  saidaEm       DateTime?
+  entregueEm    DateTime?
+  recebidoPor   String?
+  observacoes   String?
+
+  ocorrencias   OcorrenciaEntrega[]
+}
+
+model OcorrenciaEntrega {
+  id         String   @id @default(cuid())
+  entregaId  String
+  entrega    Entrega  @relation(fields: [entregaId], references: [id], onDelete: Cascade)
+  descricao  String
+  criadoEm   DateTime @default(now())
+}
+
+model Devolucao {
+  id            String   @id @default(cuid())
+  numero        String   @unique
+  clienteId     String
+  cliente       Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  pedidoVendaId String?
+  pedidoVenda   PedidoVenda? @relation(fields: [pedidoVendaId], references: [id], onDelete: SetNull)
+  tipo          String   @default("DEVOLUCAO") // DEVOLUCAO, GARANTIA
+  motivo        String // AVARIA, VALIDADE, DIVERGENCIA, DESISTENCIA, TROCA, DEFEITO
+  descricao     String?
+  status        String   @default("SOLICITADA") // SOLICITADA, EM_CONFERENCIA, APROVADA, REJEITADA, FINALIZADA
+  destino       String? // REVENDA, DESCARTE, FORNECEDOR, QUARENTENA
+  valorTotal    Float    @default(0)
+  conferidoPor  String?
+  conferidoEm   DateTime?
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+
+  itens         ItemDevolucao[]
+}
+
+model ItemDevolucao {
+  id          String  @id @default(cuid())
+  devolucaoId String
+  devolucao   Devolucao @relation(fields: [devolucaoId], references: [id], onDelete: Cascade)
+  produtoId   String
+  produto     Produto @relation(fields: [produtoId], references: [id], onDelete: Restrict)
+  loteId      String?
+  lote        Lote?   @relation(fields: [loteId], references: [id], onDelete: SetNull)
+  quantidade  Int
+  precoUnitario Float @default(0)
+  aprovado    Boolean?
+}
+
+model Inventario {
+  id        String   @id @default(cuid())
+  descricao String
+  status    String   @default("ABERTO") // ABERTO, FINALIZADO
+  iniciadoEm DateTime @default(now())
+  finalizadoEm DateTime?
+  responsavelId String?
+
+  itens     ItemInventario[]
+}
+
+model ItemInventario {
+  id             String @id @default(cuid())
+  inventarioId   String
+  inventario     Inventario @relation(fields: [inventarioId], references: [id], onDelete: Cascade)
+  produtoId      String
+  loteCodigo     String?
+  quantidadeSistema Int
+  quantidadeContada Int?
+  divergencia    Int    @default(0)
+}
+
+// ---------------------------------------------------------------------------
+// FINANCEIRO
+// ---------------------------------------------------------------------------
+
+model CategoriaFinanceira {
+  id     String @id @default(cuid())
+  nome   String @unique
+  tipo   String // RECEITA, DESPESA
+
+  contasPagar   ContaPagar[]
+  contasReceber ContaReceber[]
+}
+
+model ContaPagar {
+  id            String   @id @default(cuid())
+  descricao     String
+  fornecedorId  String?
+  fornecedor    Fornecedor? @relation(fields: [fornecedorId], references: [id], onDelete: SetNull)
+  pedidoCompraId String?
+  pedidoCompra  PedidoCompra? @relation(fields: [pedidoCompraId], references: [id], onDelete: SetNull)
+  categoriaId   String?
+  categoria     CategoriaFinanceira? @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+  valor         Float
+  valorPago     Float    @default(0)
+  vencimento    DateTime
+  pagamentoEm   DateTime?
+  status        String   @default("ABERTA") // ABERTA, PAGA, PARCIAL, VENCIDA, CANCELADA
+  documento     String?
+  observacoes   String?
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+
+  @@index([status])
+  @@index([vencimento])
+}
+
+model ContaReceber {
+  id            String   @id @default(cuid())
+  descricao     String
+  clienteId     String?
+  cliente       Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  pedidoVendaId String?
+  pedidoVenda   PedidoVenda? @relation(fields: [pedidoVendaId], references: [id], onDelete: SetNull)
+  categoriaId   String?
+  categoria     CategoriaFinanceira? @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+  valor         Float
+  valorRecebido Float    @default(0)
+  vencimento    DateTime
+  recebimentoEm DateTime?
+  status        String   @default("ABERTA") // ABERTA, RECEBIDA, PARCIAL, VENCIDA, CANCELADA
+  documento     String?
+  observacoes   String?
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+
+  cobrancas     Cobranca[]
+
+  @@index([status])
+  @@index([vencimento])
+}
+
+model Cobranca {
+  id             String   @id @default(cuid())
+  contaReceberId String
+  contaReceber   ContaReceber @relation(fields: [contaReceberId], references: [id], onDelete: Cascade)
+  tipo           String // EMAIL, TELEFONE, CARTA, NEGATIVACAO
+  descricao      String?
+  resultado      String? // PROMESSA, SEM_CONTATO, NEGOCIADO, RECUSA
+  criadoEm       DateTime @default(now())
+}
+
+model MovimentoCaixa {
+  id        String   @id @default(cuid())
+  tipo      String // ENTRADA, SAIDA
+  descricao String
+  valor     Float
+  data      DateTime @default(now())
+  origem    String? // CONTA_RECEBER, CONTA_PAGAR, MANUAL
+  origemId  String?
+
+  @@index([data])
+}
+
+model Comissao {
+  id            String   @id @default(cuid())
+  usuarioId     String
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  pedidoVendaId String?
+  pedidoVenda   PedidoVenda? @relation(fields: [pedidoVendaId], references: [id], onDelete: SetNull)
+  baseCalculo   Float
+  percentual    Float
+  valor         Float
+  status        String   @default("PENDENTE") // PENDENTE, APROVADA, PAGA
+  competencia   String // AAAA-MM
+  criadoEm      DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// MARKETING
+// ---------------------------------------------------------------------------
+
+model Campanha {
+  id          String   @id @default(cuid())
+  nome        String
+  descricao   String?
+  canal       String? // REDES_SOCIAIS, EMAIL, EVENTO, VISITA, MATERIAL_IMPRESSO
+  publicoAlvo String?
+  orcamento   Float    @default(0)
+  investido   Float    @default(0)
+  dataInicio  DateTime
+  dataFim     DateTime
+  status      String   @default("PLANEJADA") // PLANEJADA, EM_ANDAMENTO, CONCLUIDA, CANCELADA
+  resultados  String?
+  criadoEm    DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  produtos    CampanhaProduto[]
+  materiais   MaterialPromocional[]
+}
+
+model CampanhaProduto {
+  id         String   @id @default(cuid())
+  campanhaId String
+  campanha   Campanha @relation(fields: [campanhaId], references: [id], onDelete: Cascade)
+  produtoId  String
+  produto    Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+
+  @@unique([campanhaId, produtoId])
+}
+
+model MaterialPromocional {
+  id         String   @id @default(cuid())
+  campanhaId String
+  campanha   Campanha @relation(fields: [campanhaId], references: [id], onDelete: Cascade)
+  nome       String
+  tipo       String? // BANNER, FOLDER, VIDEO, POST, BRINDE
+  url        String?
+  criadoEm   DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// ADMINISTRATIVO / RH / DHO
+// ---------------------------------------------------------------------------
+
+model Departamento {
+  id       String @id @default(cuid())
+  nome     String @unique
+  area     String
+  descricao String?
+
+  cargos       Cargo[]
+  colaboradores Colaborador[]
+}
+
+model Cargo {
+  id             String @id @default(cuid())
+  nome           String
+  departamentoId String?
+  departamento   Departamento? @relation(fields: [departamentoId], references: [id], onDelete: SetNull)
+  salarioBase    Float  @default(0)
+
+  colaboradores  Colaborador[]
+}
+
+model Colaborador {
+  id             String   @id @default(cuid())
+  nome           String
+  cpf            String   @unique
+  matricula      String   @unique
+  email          String?
+  telefone       String?
+  dataNascimento DateTime?
+  dataAdmissao   DateTime
+  dataDesligamento DateTime?
+  motivoDesligamento String?
+  salario        Float    @default(0)
+  status         String   @default("ATIVO") // ATIVO, FERIAS, AFASTADO, DESLIGADO
+
+  departamentoId String?
+  departamento   Departamento? @relation(fields: [departamentoId], references: [id], onDelete: SetNull)
+  cargoId        String?
+  cargo          Cargo?   @relation(fields: [cargoId], references: [id], onDelete: SetNull)
+  usuarioId      String?  @unique
+  usuario        Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  criadoEm       DateTime @default(now())
+  atualizadoEm   DateTime @updatedAt
+
+  documentos     Documento[]
+  treinamentos   TreinamentoColaborador[]
+  avaliacoes     Avaliacao[]
+}
+
+model Documento {
+  id            String   @id @default(cuid())
+  titulo        String
+  tipo          String // CONTRATO, ASO, CERTIFICADO, LICENCA, POLITICA, OUTRO
+  colaboradorId String?
+  colaborador   Colaborador? @relation(fields: [colaboradorId], references: [id], onDelete: Cascade)
+  url           String?
+  validade      DateTime?
+  observacoes   String?
+  criadoEm      DateTime @default(now())
+
+  @@index([tipo])
+}
+
+model Treinamento {
+  id          String   @id @default(cuid())
+  nome        String
+  descricao   String?
+  cargaHoraria Int     @default(0)
+  obrigatorio Boolean  @default(false)
+  dataInicio  DateTime?
+  dataFim     DateTime?
+
+  participantes TreinamentoColaborador[]
+}
+
+model TreinamentoColaborador {
+  id            String   @id @default(cuid())
+  treinamentoId String
+  treinamento   Treinamento @relation(fields: [treinamentoId], references: [id], onDelete: Cascade)
+  colaboradorId String
+  colaborador   Colaborador @relation(fields: [colaboradorId], references: [id], onDelete: Cascade)
+  status        String   @default("INSCRITO") // INSCRITO, CONCLUIDO, REPROVADO
+  nota          Float?
+  concluidoEm   DateTime?
+
+  @@unique([treinamentoId, colaboradorId])
+}
+
+model Avaliacao {
+  id            String   @id @default(cuid())
+  colaboradorId String
+  colaborador   Colaborador @relation(fields: [colaboradorId], references: [id], onDelete: Cascade)
+  periodo       String // ex: 2026-S1
+  nota          Float
+  pontosFortes  String?
+  pontosMelhoria String?
+  avaliadorId   String?
+  criadoEm      DateTime @default(now())
+}
