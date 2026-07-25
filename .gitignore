@@ -17,3 +17,6 @@ tsconfig.tsbuildinfo
 
 # bancos temporários dos testes
 .tmp-testes
+
+# Contexto local do Neon CLI (IDs de org/projeto, sem segredos)
+.neon
