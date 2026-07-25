@@ -7,9 +7,12 @@ import { AREA_LABEL, PERFIL_LABEL, type Area, type Perfil } from "@/lib/constant
 import { SENHA_DEMO, USUARIOS_DEMO } from "@/lib/demo-users";
 import { Logo } from "@/components/logo";
 
-// Atalhos de acesso rápido só existem fora de produção, para não expor
-// credenciais em um ambiente publicado.
-const MOSTRAR_ATALHOS = process.env.NODE_ENV !== "production";
+// Painel de acesso rápido. Habilitado inclusive em produção a pedido do dono do
+// projeto, por ser um sistema de DEMONSTRAÇÃO com dados fictícios.
+// ATENÇÃO: isto expõe as credenciais publicamente — qualquer pessoa com o
+// endereço entra como administrador. Não use com dados reais.
+// Para esconder de novo, basta trocar para: process.env.NODE_ENV !== "production".
+const MOSTRAR_ATALHOS = true;
 
 export default function LoginPage() {
   return (
@@ -86,10 +89,10 @@ function Formulario() {
           {MOSTRAR_ATALHOS ? (
             <div className="rounded-2xl bg-white/5 p-5 ring-1 ring-white/10">
               <div className="mb-3">
-                <h2 className="text-sm font-semibold text-white">Acesso rápido — ambiente de demonstração</h2>
+                <h2 className="text-sm font-semibold text-white">Acesso rápido — contas de demonstração</h2>
                 <p className="mt-0.5 text-xs text-tinta-400">
-                  Clique em um usuário para entrar direto. O menu e as ações disponíveis mudam conforme a área e o
-                  perfil de cada um.
+                  Clique em um usuário para entrar direto na conta dele. O menu e as ações mudam conforme a área e o
+                  perfil. Login e senha estão em cada cartão.
                 </p>
               </div>
 
@@ -105,23 +108,36 @@ function Formulario() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium text-white">{u.nome}</p>
-                          <p className="truncate text-xs text-tinta-400">{u.cargo}</p>
+                          <p className="truncate text-xs text-tinta-400">
+                            {u.cargo} · {AREA_LABEL[u.area as Area]}
+                          </p>
                         </div>
                         <span className="shrink-0 rounded-full bg-marca-600/20 px-2 py-0.5 text-[10px] font-medium text-marca-300">
                           {PERFIL_LABEL[u.perfil as Perfil]}
                         </span>
                       </div>
-                      <p className="mt-1.5 truncate text-[11px] text-tinta-500">{AREA_LABEL[u.area as Area]}</p>
+
+                      <dl className="mt-2 space-y-0.5 border-t border-white/10 pt-2 text-[11px]">
+                        <div className="flex gap-1.5">
+                          <dt className="shrink-0 text-tinta-500">login:</dt>
+                          <dd className="truncate font-mono text-tinta-200">{u.email}</dd>
+                        </div>
+                        <div className="flex gap-1.5">
+                          <dt className="shrink-0 text-tinta-500">senha:</dt>
+                          <dd className="font-mono text-tinta-200">{SENHA_DEMO}</dd>
+                        </div>
+                      </dl>
+
                       {carregando === u.email ? (
-                        <p className="mt-1 text-[11px] font-medium text-marca-300">Entrando...</p>
+                        <p className="mt-1.5 text-[11px] font-medium text-marca-300">Entrando...</p>
                       ) : null}
                     </button>
                   </li>
                 ))}
               </ul>
 
-              <p className="mt-3 border-t border-white/10 pt-3 text-[11px] text-tinta-500">
-                Senha de todos os usuários: <code className="font-mono text-tinta-300">{SENHA_DEMO}</code>
+              <p className="mt-3 border-t border-white/10 pt-3 text-[11px] leading-relaxed text-amber-300/80">
+                Ambiente de demonstração: as credenciais ficam visíveis a qualquer visitante. Não cadastre dados reais.
               </p>
             </div>
           ) : null}
