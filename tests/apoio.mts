@@ -1,44 +1,65 @@
 /**
  * Infraestrutura dos testes.
  *
- * Cada arquivo de teste roda contra o SEU PRÓPRIO banco SQLite temporário
- * (definido por DATABASE_URL antes de importar o Prisma Client), de modo que
- * os testes nunca tocam o dev.db e podem rodar em paralelo sem interferência.
+ * Os testes de banco rodam contra um PostgreSQL — o mesmo provider de produção.
+ * Cada arquivo usa um SCHEMA Postgres próprio (isolamento), criado a partir de
+ * TEST_DATABASE_URL.
+ *
+ * Quando TEST_DATABASE_URL não está definida (ex.: máquina sem Postgres), os
+ * testes de banco se PULAM sozinhos — ver `TEM_BANCO_TESTE` e o padrão usado em
+ * cada arquivo de teste. Os testes de lógica pura (permissões, validação,
+ * sincronização) não dependem de banco e sempre rodam.
+ *
+ * Para rodar os testes de banco:
+ *   TEST_DATABASE_URL="postgresql://.../teste" npm test
  */
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
-import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 
-const RAIZ = path.resolve(import.meta.dirname, "..");
-const DIR_TMP = path.join(RAIZ, ".tmp-testes");
+const RAIZ = new URL("..", import.meta.url).pathname;
+
+/** Há um Postgres de teste disponível? */
+export const TEM_BANCO_TESTE = Boolean(process.env.TEST_DATABASE_URL);
+
+// O cliente Prisma exige DATABASE_URL no momento do import, senão lança. Quando
+// não há banco de teste, definimos uma URL fictícia só para o import não quebrar
+// — nenhuma query roda, porque as suítes de banco ficam puladas.
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL =
+    process.env.TEST_DATABASE_URL ?? "postgresql://ficticio:ficticio@localhost:5432/ficticio?schema=public";
+}
 
 /**
- * Prepara um banco limpo e aponta DATABASE_URL para ele.
+ * Prepara um schema Postgres limpo e aponta DATABASE_URL para ele. Retorna
+ * `true` quando o banco está disponível e pronto; `false` quando não há
+ * TEST_DATABASE_URL (nesse caso a suíte deve se pular).
  *
- * IMPORTANTE: deve ser chamada ANTES de importar qualquer módulo que use o
- * cliente Prisma compartilhado (`src/lib/db.ts`), pois esse singleton lê a
- * variável de ambiente no momento do import. Por isso os testes usam
- * `await import(...)` dinâmico depois de chamar esta função.
+ * IMPORTANTE: chame ANTES de importar qualquer módulo que use o cliente Prisma
+ * compartilhado (`src/lib/db.ts`), pois o singleton lê a variável de ambiente no
+ * import. Por isso os testes usam `await import(...)` dinâmico depois desta função.
  */
-export function prepararBanco(nome: string): string {
-  if (!existsSync(DIR_TMP)) mkdirSync(DIR_TMP, { recursive: true });
+export function prepararBanco(nome: string): boolean {
+  if (!TEM_BANCO_TESTE) return false;
 
-  const arquivo = path.join(DIR_TMP, `${nome}.db`);
-  rmSync(arquivo, { force: true });
-  rmSync(`${arquivo}-journal`, { force: true });
+  const base = process.env.TEST_DATABASE_URL as string;
+  const schema = `teste_${nome}`;
 
-  const url = `file:${arquivo}`;
+  // Substitui (ou adiciona) o parâmetro `schema` para isolar cada arquivo.
+  const u = new URL(base);
+  u.searchParams.set("schema", schema);
+  const url = u.toString();
   process.env.DATABASE_URL = url;
 
-  // Cria o schema no banco recém-criado.
+  // Cria/atualiza as tabelas no schema isolado deste arquivo de teste.
+  // Sem --force-reset: isso derrubaria o banco inteiro. O isolamento vem do
+  // schema próprio; as suítes que agregam globalmente limpam suas tabelas.
   execSync("npx prisma db push --skip-generate --accept-data-loss", {
     cwd: RAIZ,
     env: { ...process.env, DATABASE_URL: url },
     stdio: "pipe",
   });
 
-  return url;
+  return true;
 }
 
 /** Data relativa a hoje, em dias (negativo = passado). */
@@ -161,7 +182,3 @@ export async function conferirTudo(db: Prisma, pedidoId: string) {
   }
 }
 
-/** Remove os bancos temporários criados pelos testes. */
-export function limparBancos() {
-  rmSync(DIR_TMP, { recursive: true, force: true });
-}

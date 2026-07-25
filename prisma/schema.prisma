@@ -1,18 +1,21 @@
 // Schema do Sistema de Gestao - Distribuidora Farmaceutica
 //
-// PORTABILIDADE: o provider abaixo esta em "sqlite" para permitir rodar o
-// projeto localmente sem servidor de banco. Para migrar para PostgreSQL basta
-// trocar o provider para "postgresql" e ajustar DATABASE_URL no .env.
-// Por esse motivo o schema evita recursos nao suportados pelo SQLite
-// (enums e arrays). Os campos de status usam String e sao validados na
-// aplicacao atraves das constantes em src/lib/constants.ts.
+// BANCO: PostgreSQL, tanto em producao (Vercel) quanto em desenvolvimento.
+// Aponte DATABASE_URL no .env para o mesmo banco na nuvem ou um Postgres local.
+// O schema evita enums e arrays de proposito, para manter portabilidade e
+// simplicidade: os campos de status usam String e sao validados na aplicacao
+// atraves das constantes em src/lib/constants.ts.
 
 generator client {
   provider = "prisma-client-js"
+  // "native" cobre a maquina de dev; "rhel-openssl-3.0.x" e o runtime das
+  // funcoes serverless da Vercel (AWS Lambda). Sem isso, o Prisma nao encontra
+  // o engine em producao.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

@@ -8,7 +8,7 @@ import {
   criarProduto,
   criarUsuario,
   prepararBanco,
-} from "./apoio.mjs";
+  TEM_BANCO_TESTE } from "./apoio.mjs";
 
 // O banco precisa existir antes de importar os módulos que usam o Prisma.
 prepararBanco("pedidos");
@@ -19,6 +19,7 @@ const { disponivelPorProduto } = await import("../src/server/estoque.js");
 let usuarioId: string;
 
 before(async () => {
+    if (!TEM_BANCO_TESTE) return;
   usuarioId = (await criarUsuario(prisma)).id;
 });
 
@@ -26,7 +27,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-describe("fluxo do pedido de venda", () => {
+describe("fluxo do pedido de venda", { skip: !TEM_BANCO_TESTE }, () => {
   it("percorre o ciclo completo e produz os efeitos em estoque, fiscal e financeiro", async () => {
     const cliente = await criarCliente(prisma);
     const produto = await criarProduto(prisma, { precoVenda: 20, custoMedio: 10 });

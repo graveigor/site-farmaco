@@ -1,6 +1,6 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { criarLote, criarProduto, prepararBanco } from "./apoio.mjs";
+import { criarLote, criarProduto, prepararBanco, TEM_BANCO_TESTE } from "./apoio.mjs";
 
 prepararBanco("estoque");
 const { prisma } = await import("../src/lib/db.js");
@@ -12,7 +12,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-describe("seleção de lotes por FEFO", () => {
+describe("seleção de lotes por FEFO", { skip: !TEM_BANCO_TESTE }, () => {
   it("consome primeiro o lote que vence antes", async () => {
     const produto = await criarProduto(prisma);
     await criarLote(prisma, produto.id, 50, 300, "TARDE");
@@ -73,7 +73,7 @@ describe("seleção de lotes por FEFO", () => {
   });
 });
 
-describe("custo médio ponderado", () => {
+describe("custo médio ponderado", { skip: !TEM_BANCO_TESTE }, () => {
   it("pondera a entrada nova contra o saldo existente", async () => {
     // 100 un a R$ 10 + 100 un a R$ 20 => custo médio R$ 15.
     const produto = await criarProduto(prisma, { custoMedio: 10 });
@@ -114,7 +114,7 @@ describe("custo médio ponderado", () => {
   });
 });
 
-describe("alertas de estoque", () => {
+describe("alertas de estoque", { skip: !TEM_BANCO_TESTE }, () => {
   it("classifica lotes vencidos, a vencer e produtos abaixo do mínimo", async () => {
     // Banco isolado por teste seria ideal; aqui limpamos o que já existe.
     await prisma.movimentoEstoque.deleteMany();

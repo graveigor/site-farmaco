@@ -13,6 +13,18 @@ function dias(n: number) {
 }
 
 async function main() {
+  // Proteção contra apagar dados por engano: se já houver usuários, o seed só
+  // roda com SEED_FORCE=1. Assim, rodar `npm run db:seed` apontando para o
+  // banco de produção não zera a base sem intenção clara.
+  const jaExiste = await prisma.usuario.count();
+  if (jaExiste > 0 && process.env.SEED_FORCE !== "1") {
+    console.log(
+      `Base já tem ${jaExiste} usuário(s). Seed ignorado para não apagar dados.\n` +
+        "Para popular mesmo assim (APAGA TUDO), rode com SEED_FORCE=1.",
+    );
+    return;
+  }
+
   console.log("Limpando base...");
   // Ordem respeita as dependências de chave estrangeira.
   await prisma.$transaction([

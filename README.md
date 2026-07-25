@@ -48,6 +48,15 @@ npm test
 98 testes cobrindo as regras de negócio — o código que, se quebrar, causa prejuízo real
 (estoque errado, título duplicado, venda acima do crédito).
 
+Os testes de **lógica pura** (permissões, validação, sincronização — 54 testes) rodam sempre.
+Os testes de **banco** (44 testes) precisam de um Postgres: defina `TEST_DATABASE_URL`
+apontando para um banco dedicado a testes. Sem essa variável, eles se pulam sozinhos e
+`npm test` continua verde com os testes de lógica.
+
+```bash
+TEST_DATABASE_URL="postgresql://.../banco_de_testes" npm test
+```
+
 | Arquivo | O que cobre |
 | --- | --- |
 | `tests/pedidos.test.mts` | Ciclo completo do pedido e cada bloqueio: transição fora de ordem, estoque insuficiente, cliente bloqueado, limite de crédito, divergência na conferência, liberação de reserva no cancelamento |
@@ -59,8 +68,8 @@ npm test
 | `tests/permissoes.test.mts` | Matriz área × perfil e módulos restritos |
 | `tests/validacao.test.mts` | Schemas Zod, CNPJ, numeração de documentos, integridade da máquina de estados |
 
-Cada arquivo cria seu **próprio banco SQLite temporário** em `.tmp-testes/` — os testes
-nunca tocam o `dev.db`. A infraestrutura está em `tests/apoio.mts`.
+Cada arquivo de teste de banco usa um **schema Postgres próprio** (isolamento), criado a
+partir de `TEST_DATABASE_URL`. A infraestrutura está em `tests/apoio.mts`.
 
 Os testes usam extensão `.mts` porque precisam de ESM (top-level await) para apontar o
 `DATABASE_URL` ao banco de teste antes de importar o cliente Prisma.
@@ -69,7 +78,7 @@ Os testes usam extensão `.mts` porque precisam de ESM (top-level await) para ap
 
 - **Next.js 15** (App Router, Server Components) + **TypeScript**
 - **Tailwind CSS v4** — tema corporativo em `src/app/globals.css`
-- **Prisma** sobre **SQLite** (portável para PostgreSQL — ver abaixo)
+- **Prisma** sobre **PostgreSQL** (Neon na Vercel — ver "Deploy na Vercel")
 - **Zod** para validação de entrada
 - Sessão própria via **JWT em cookie httpOnly** (`jose`) + `bcryptjs`
 
@@ -190,17 +199,41 @@ vencidos, próximos do vencimento (90 e 30 dias), estoque baixo e zerado.
 
 ## Banco de dados
 
-O projeto usa SQLite por padrão para rodar sem depender de servidor. O schema foi escrito
-de forma portável — sem enums e sem arrays, com status em `String` validados na aplicação
-pelas constantes de `src/lib/constants.ts`.
+O projeto usa **PostgreSQL** (o schema evita enums e arrays de propósito; os status são
+`String` validados na aplicação por `src/lib/constants.ts`). Use a mesma connection string
+em desenvolvimento e produção, ou um Postgres local em dev.
 
-Para migrar para PostgreSQL:
+Para desenvolver localmente:
 
-1. Em `prisma/schema.prisma`, troque `provider = "sqlite"` por `provider = "postgresql"`.
-2. Ajuste `DATABASE_URL` no `.env`.
-3. Rode `npx prisma migrate dev`.
+1. Cole a `DATABASE_URL` (do Neon ou de um Postgres local) no `.env`.
+2. `npm run db:push` cria as tabelas; `npm run db:seed` popula os dados de demonstração.
+3. `npm run dev`.
 
-Nenhuma outra alteração de código é necessária.
+## Deploy na Vercel
+
+O repositório já está pronto para a Vercel. Passos, uma vez só:
+
+1. **Banco:** no painel do projeto na Vercel, vá em **Storage → Create Database → Postgres
+   (Neon)**. A Vercel cria e injeta a variável `DATABASE_URL` sozinha.
+2. **Sessão:** em **Settings → Environment Variables**, adicione `AUTH_SECRET` com um valor
+   gerado por `openssl rand -base64 32`.
+3. **Redeploy.** O build usa o script `vercel-build`:
+   `prisma generate && prisma db push && tsx prisma/seed.ts && next build`.
+   Ele cria as tabelas e popula os usuários de demonstração no primeiro deploy.
+
+O seed é **idempotente**: se já houver usuários, ele é ignorado e não apaga nada (guardado
+por `SEED_FORCE`). Assim, deploys seguintes não zeram os dados.
+
+Depois do primeiro deploy, entre com qualquer usuário da tabela acima (senha `farma@2026`).
+
+> **Binary target do Prisma:** o schema declara `rhel-openssl-3.0.x` além de `native`, que é
+> o runtime das funções serverless da Vercel. Sem ele, o Prisma não acha o engine em produção.
+
+> **Tempo real em serverless:** o barramento de eventos vive na memória do processo. Em uma
+> instância única funciona; com o autoscaling da Vercel, dois usuários podem cair em funções
+> diferentes e não ver os eventos um do outro. O app continua correto — os dados sincronizam
+> ao navegar/atualizar. Para tempo real confiável em produção, troque o barramento por Redis
+> pub/sub ou Postgres LISTEN/NOTIFY (ver `src/server/eventos.ts`).
 
 ## Pontos de atenção antes de produção
 
@@ -211,6 +244,11 @@ Itens conscientemente fora do escopo desta entrega:
 - **Emissão fiscal é simulada.** `NotaFiscal` gera número e chave internos; não há
   integração com SEFAZ nem geração de XML/DANFE.
 - **`AUTH_SECRET` precisa ser trocado.** Gere com `openssl rand -base64 32`.
+- **`prisma db push` no build** cria/atualiza o schema direto, sem migrations versionadas.
+  Bom para demonstração; para produção real, adote `prisma migrate` com histórico de migração.
+- **`sharp` tem 3 vulnerabilidades `high`** (herdadas do libvips, via otimizador de imagens do
+  Next). Baixo risco aqui, já que a UI usa SVG inline e não `next/image`. Some ao subir a
+  versão do Next que empacote um `sharp` corrigido.
 - **Testes cobrem a camada de negócio, não a interface.** Não há testes de componente nem
   end-to-end de navegador; a UI foi validada manualmente.
 - **Listagens carregam até 100–300 registros** sem paginação na UI. O helper `paginacao()`

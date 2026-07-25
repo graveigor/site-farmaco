@@ -4,6 +4,11 @@ import { assinar, entrar, sair, usuariosOnline, type Evento } from "@/server/eve
 // Streaming exige renderização dinâmica e sem cache.
 export const dynamic = "force-dynamic";
 
+// Em ambiente serverless (Vercel) as funções têm tempo máximo de execução. O
+// stream é encerrado ao atingir o limite e o navegador reconecta sozinho. Ver a
+// nota sobre tempo real serverless no README.
+export const maxDuration = 60;
+
 /** Intervalo do sinal de vida, para proxies não derrubarem a conexão ociosa. */
 const BATIMENTO_MS = 25_000;
 

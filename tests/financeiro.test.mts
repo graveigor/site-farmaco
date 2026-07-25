@@ -1,6 +1,6 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { criarCliente, criarFornecedor, emDias, prepararBanco } from "./apoio.mjs";
+import { criarCliente, criarFornecedor, emDias, prepararBanco, TEM_BANCO_TESTE } from "./apoio.mjs";
 
 prepararBanco("financeiro");
 const { prisma } = await import("../src/lib/db.js");
@@ -24,7 +24,7 @@ async function tituloPagar(valor: number, vencimentoEmDias = 30) {
   });
 }
 
-describe("baixa de contas a receber", () => {
+describe("baixa de contas a receber", { skip: !TEM_BANCO_TESTE }, () => {
   it("quita o título quando o valor total é baixado", async () => {
     const titulo = await tituloReceber(500);
     const r = await darBaixa("receber", titulo.id, 500);
@@ -89,7 +89,7 @@ describe("baixa de contas a receber", () => {
   });
 });
 
-describe("baixa de contas a pagar", () => {
+describe("baixa de contas a pagar", { skip: !TEM_BANCO_TESTE }, () => {
   it("quita e gera saída no fluxo de caixa", async () => {
     const titulo = await tituloPagar(800);
     const r = await darBaixa("pagar", titulo.id, 800);
@@ -111,7 +111,7 @@ describe("baixa de contas a pagar", () => {
   });
 });
 
-describe("indicadores financeiros", () => {
+describe("indicadores financeiros", { skip: !TEM_BANCO_TESTE }, () => {
   it("soma apenas o saldo não quitado", async () => {
     await prisma.movimentoCaixa.deleteMany();
     await prisma.contaReceber.deleteMany();

@@ -1,6 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { criarCliente, criarLote, criarProduto, criarUsuario, prepararBanco } from "./apoio.mjs";
+import { criarCliente, criarLote, criarProduto, criarUsuario, prepararBanco, TEM_BANCO_TESTE } from "./apoio.mjs";
 
 prepararBanco("devolucoes");
 const { prisma } = await import("../src/lib/db.js");
@@ -10,6 +10,7 @@ const { saldoTotal } = await import("../src/server/estoque.js");
 let usuarioId: string;
 
 before(async () => {
+    if (!TEM_BANCO_TESTE) return;
   usuarioId = (await criarUsuario(prisma)).id;
 });
 
@@ -66,7 +67,7 @@ async function criarDevolucao(produtoId: string, loteId: string, quantidade: num
   });
 }
 
-describe("conferência de devolução", () => {
+describe("conferência de devolução", { skip: !TEM_BANCO_TESTE }, () => {
   it("devolve o item ao estoque quando o destino é revenda", async () => {
     const produto = await criarProduto(prisma);
     const lote = await criarLote(prisma, produto.id, 100, 300);
@@ -117,7 +118,7 @@ describe("conferência de devolução", () => {
   });
 });
 
-describe("movimentação de estoque", () => {
+describe("movimentação de estoque", { skip: !TEM_BANCO_TESTE }, () => {
   it("impede que a saída deixe o lote negativo", async () => {
     const produto = await criarProduto(prisma);
     const lote = await criarLote(prisma, produto.id, 10, 300);

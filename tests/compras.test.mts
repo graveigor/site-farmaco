@@ -1,6 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { criarFornecedor, criarLote, criarProduto, criarUsuario, emDias, prepararBanco } from "./apoio.mjs";
+import { criarFornecedor, criarLote, criarProduto, criarUsuario, emDias, prepararBanco, TEM_BANCO_TESTE } from "./apoio.mjs";
 
 prepararBanco("compras");
 const { prisma } = await import("../src/lib/db.js");
@@ -10,6 +10,7 @@ const { saldoTotal } = await import("../src/server/estoque.js");
 let usuarioId: string;
 
 before(async () => {
+    if (!TEM_BANCO_TESTE) return;
   usuarioId = (await criarUsuario(prisma)).id;
 });
 
@@ -32,7 +33,7 @@ async function criarCompra(produtoId: string, quantidade: number, precoUnitario:
   });
 }
 
-describe("fluxo de compra", () => {
+describe("fluxo de compra", { skip: !TEM_BANCO_TESTE }, () => {
   it("gera contas a pagar na aprovação", async () => {
     const produto = await criarProduto(prisma);
     const compra = await criarCompra(produto.id, 100, 12);
@@ -168,7 +169,7 @@ describe("fluxo de compra", () => {
   });
 });
 
-describe("sugestão de reposição", () => {
+describe("sugestão de reposição", { skip: !TEM_BANCO_TESTE }, () => {
   it("lista apenas produtos no ou abaixo do mínimo, com a quantidade para atingir o máximo", async () => {
     await prisma.movimentoEstoque.deleteMany();
     await prisma.itemPedidoCompra.deleteMany();
